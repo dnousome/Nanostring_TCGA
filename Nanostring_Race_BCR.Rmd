@@ -1,0 +1,129 @@
+---
+title: "Nanostring CPDR Validation"
+author: "Darryl Nousome"
+date: "12/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(gtsummary)
+library(kableExtra)
+library(ggplot2)
+library(pheatmap)
+library(impute)
+
+```
+
+## Methods
+
+Two cutpoints were used for age.  
+Cutpoint 1: Young=40-60 and Old=61-80   
+Cutpoint 2: Young=42-58 and Old=66-73  
+Cutpoint 2 has more missing due to the more stringent cutpoints
+
+
+```{r table1,echo=F,message=F,error=F}
+res=read_rds("../Data/results_race_bcr_age.rds")
+covar=read_rds("../Data/covar_race_bcr_age.rds")
+res_mean=read_rds("../Data/results_mean_race_bcr_age.rds")
+
+covar$`Age Category 1`=factor(covar$Agecat1,labels=c("40-60","61-80"))
+covar$`Age Category 2`=factor(covar$Agecat2,labels=c("42-58","66-73"))
+#covar$Gleason=factor(covar$Gleason,labels=c("6","3+4","4+3","8-10"))
+covar$BCR1=ifelse(covar$BCR=="0","No",ifelse(covar$BCR=="1","Yes",NA))
+
+covar %>% select(DXAGE,race_all,`Age Category 1`,`Age Category 2`,BCR1) %>%
+ 
+  tbl_summary(statistic = list(all_continuous() ~ "{mean} ({sd})",
+                     all_categorical() ~ "{n} ({p}%)"),
+              label=list(race_all~"Race",DXAGE~"Diagnosis Age",BCR1~"Biochemical Recurrence"))
+
+
+```
+
+
+## Differential Expression Analysis using linear regression
+### Using Cutpoint 2  
+
+```{r results1, echo=FALSE,error=F,warning=F}
+res[[1]]   %>% filter(!is.na(P)) %>%
+  kable(caption="Tumor/Normal Ratio comparing Old vs Young (reference) using Cutpoint 1",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+
+res[[2]]   %>% filter(!is.na(P)) %>%
+  kable(caption="Tumor/Normal Ratio comparing Old vs Young (reference) using Cutpoint 2",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+
+```
+
+## Differential expression of BCR   
+
+```{r results2, echo=FALSE,error=F,warning=F}
+
+res[[3]]   %>% filter(!is.na(P)) %>%
+  kable(caption="Tumor/Normal Ratio comparing BCR to non-BCR (reference) using logistic regression",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+
+res[[4]]   %>% filter(!is.na(P)) %>%
+  select(Gene,HR=Estimate,everything()) %>%
+  kable(caption="Tumor/Normal Ratio using BCR as outcome for Cox Model for time to event",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+
+```
+
+## Differential expression by Race  
+
+```{r race,echo=F,message=F}
+
+
+res[[5]]   %>% filter(!is.na(P)) %>%
+  kable(caption="Tumor/Normal Ratio comparing AA to CA (reference) using logistic regression",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+
+```
+
+
+
+### Additional Analysis
+Examine means of each group 
+
+```{r by group,echo=F,message=F}
+
+
+res_mean[[1]]  %>% filter(!is.na(Difference)) %>%
+  kable(caption="Tumor/Normal Mean Difference comparing Older to Younger using cutpoint 1",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+
+res_mean[[2]]  %>% filter(!is.na(Difference)) %>%
+  kable(caption="Tumor/Normal Mean Difference comparing Older to Younger using cutpoint 2",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+
+res_mean[[3]]  %>% filter(!is.na(Difference)) %>%
+  kable(caption="Tumor/Normal Mean Difference comparing BCR to Non-BCR",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+res_mean[[4]]  %>% filter(!is.na(Difference)) %>%
+  kable(caption="Tumor/Normal Mean Difference comparing AA to CA",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "350px")
+
+```
+
