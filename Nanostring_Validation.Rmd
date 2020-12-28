@@ -1,0 +1,221 @@
+---
+title: "Nanostring CPDR Validation"
+author: "Darryl Nousome"
+date: "11/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(arsenal)
+library(kableExtra)
+library(ggplot2)
+library(pheatmap)
+library(impute)
+
+```
+
+## Methods
+
+Two cutpoints were used for age.  
+Cutpoint 1: Young=40-60 and Old=61-80   
+Cutpoint 2: Young=42-58 and Old=66-73  
+Cutpoint 2 has more missing due to the more stringent cutpoints
+Used Cutpoint 2 only!
+
+```{r table1,echo=F,message=F,error=F}
+res_63=read_rds("finalres_nano.rds")
+covar_63=read_rds("finalcovar_nano.rds")
+dt_63=read_rds("hm_63.rds")
+
+covar_63$`Age Category 1`=factor(covar_63$Agecat1,labels=c("40-60","61-80"))
+covar_63$`Age Category 2`=factor(covar_63$Agecat2,labels=c("42-58","66-73"))
+#covar$Gleason=factor(covar$Gleason,labels=c("6","3+4","4+3","8-10"))
+covar_63$BCR=ifelse(covar_63$BCR=="0","No",ifelse(covar_63$BCR=="1","Yes",NA))
+
+tab.bygroup <- tableby(~ DXAGE+`Age Category 1`+`Age Category 2`+RACE+path_gleason+BCR, data=covar_63,test=F) 
+labelsdt=list(`DXAGE`="Age at diagonsis",Agecat1="Young/Old Cutpoint 1",Agecat2="Young/Old Cutpoint 2",path_gleason="Gleason",BCR="Biochemical Recurrence")
+
+summary(tab.bygroup,labelTranslations=labelsdt,digits=1) %>% 
+  kable(format="markdown")
+
+ggplot(covar_63,aes(DXAGE)) +
+  geom_histogram(bins=20) +xlab("Age at Diagnosis")
+
+```
+
+
+## Differential Expression Analysis using linear regression
+### Using Cutpoint 2  
+
+```{r results1, echo=FALSE,error=F,warning=F}
+res_63[[7]]   %>%
+  kable(caption="Mean of Tumor/Normal Ratio in Each Subgroup Analysis using Cutpoint 1",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+
+
+res_63[[8]]  %>% 
+  kable(caption="Mean of Tumor/Normal Ratio in Each Subgroup Analysis using Cutpoint 2",digits=2) %>% 
+  kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+
+
+```
+
+## Differential Expression Analysis using linear regression
+### Using Cutpoint 2  
+
+```{r results2, echo=FALSE,error=F,warning=F}
+res_63[[4]]   %>% arrange(P) %>%
+  mutate(P=format.pval(P, eps = .001, digits = 2)) %>%
+  kable(caption="Results for Old vs Young (Reference group) with Cutpoint 2",digits=2) %>% kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+res_63[[5]]  %>% arrange(P) %>%
+  mutate(P=format.pval(P, eps = .001, digits = 2)) %>%
+  kable(caption="Results for Old vs Young (Reference group) with Cutpoint 2 in CA Men ONLY",digits=2) %>% kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+res_63[[6]]  %>% arrange(P) %>%
+  mutate(P=format.pval(P, eps = .001, digits = 2)) %>%
+  kable(caption="Results for Old vs Young (Reference group) with Cutpoint 2 in AA Men ONLY",digits=2) %>% kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+
+
+##Imputation of heatmap matrix
+dt_63_im=impute.knn(as.matrix(dt_63[,-1]),k = 4)
+dt_63_im=data.frame(dt_63_im$data)
+rownames(dt_63_im)=dt_63$`Gene Name`
+covar_63_annot=covar_63 %>% mutate(ID=paste0("FP",FP))  %>%
+  column_to_rownames("ID") %>%
+  select(`Age Category 1` ,`Age Category 2`,Gleason=path_gleason,`Biochemical Recurrence`=BCR)
+
+
+
+```
+
+```{r heat,echo=F,out.width="225%"}
+
+mat_colors <- list(`Age Category` = c("#7fc97f","#fdc086"),
+                   Gleason=c('#fec44f',"#d95f0e"),
+                   `Biochemical Recurrence`=c('#1b9e77','#7570b3')
+)
+names(mat_colors$`Age Category`) <- c("42-58","66-73")
+names(mat_colors$Gleason) <- c("3+3","3+4")
+names(mat_colors$`Biochemical Recurrence`) <- c("No","Yes")
+
+annot1=covar_63_annot %>% select(`Age Category`=`Age Category 1`,Gleason,`Biochemical Recurrence`)
+
+
+annot2=covar_63_annot %>% filter(!is.na(`Age Category 2`)) %>% 
+  select(`Age Category`=`Age Category 2`,Gleason,`Biochemical Recurrence`)
+dt_63_temp=dt_63_im %>% select(rownames(annot2))
+
+##Sort by age
+
+annot1_temp=annot2 %>% select(`Age Category`) %>% arrange(`Age Category`)
+dt_63_temp=dt_63_temp[,order(match(colnames(dt_63_temp),rownames(annot1_temp)))]
+pheatmap(dt_63_temp,scale="column",annotation_col = annot1_temp,clustering_method = "ward.D",
+         show_colnames =  F,annotation_colors = mat_colors,cluster_cols = F)
+
+
+##BCR Sort
+annot2=covar_63_annot %>% filter(!is.na(`Age Category 2`)) %>% select(`Age Category`=`Age Category 2`,Gleason,`Biochemical Recurrence`)
+dt_63_temp=dt_63_im %>% select(rownames(annot2))
+
+annot1_temp=annot2 %>% select(`Biochemical Recurrence`)  %>% arrange(`Biochemical Recurrence`)
+
+dt_63_temp=dt_63_temp[,order(match(colnames(dt_63_temp),rownames(annot1_temp)))]
+pheatmap(dt_63_temp,scale="column",annotation_col = annot1_temp,clustering_method = "ward.D",
+         show_colnames =  F,annotation_colors = mat_colors,cluster_cols = F)
+
+
+##Young only BCR
+mat_colors <- list(`Age Category` = c("#7fc97f"),
+                   Gleason=c('#fec44f',"#d95f0e"),
+                   `Biochemical Recurrence`=c('#1b9e77','#7570b3')
+)
+names(mat_colors$`Age Category`) <- c("42-58")
+names(mat_colors$Gleason) <- c("3+3","3+4")
+names(mat_colors$`Biochemical Recurrence`) <- c("No","Yes")
+
+annot2=covar_63_annot %>% filter(!is.na(`Age Category 2`)) %>% 
+  select(`Age Category`=`Age Category 2`,Gleason,`Biochemical Recurrence`)
+dt_63_temp=dt_63_im %>% select(rownames(annot2))
+
+annot1_temp=annot2 %>% select(`Age Category`,`Biochemical Recurrence`)  %>% 
+  filter(`Age Category`=="42-58") %>% arrange(`Biochemical Recurrence`)
+dt_63_temp=dt_63_temp[,colnames(dt_63_temp) %in% rownames(annot1_temp)]
+dt_63_temp=dt_63_temp[,order(match(colnames(dt_63_temp),rownames(annot1_temp)))]
+pheatmap(dt_63_temp,scale="column",annotation_col = annot1_temp,clustering_method = "ward.D",
+         show_colnames =  F,annotation_colors = mat_colors,cluster_cols = F)
+
+
+###olrder
+mat_colors <- list(`Age Category` = c("#fdc086"),
+                   Gleason=c('#fec44f',"#d95f0e"),
+                   `Biochemical Recurrence`=c('#1b9e77','#7570b3')
+)
+names(mat_colors$`Age Category`) <- c("66-73")
+names(mat_colors$Gleason) <- c("3+3","3+4")
+names(mat_colors$`Biochemical Recurrence`) <- c("No","Yes")
+
+annot2=covar_63_annot %>% filter(!is.na(`Age Category 2`)) %>% 
+  select(`Age Category`=`Age Category 2`,Gleason,`Biochemical Recurrence`)
+dt_63_temp=dt_63_im %>% select(rownames(annot2))
+
+annot1_temp=annot2 %>% select(`Age Category`,`Biochemical Recurrence`)  %>% 
+  filter(`Age Category`=="66-73") %>% arrange(`Biochemical Recurrence`)
+dt_63_temp=dt_63_temp[,colnames(dt_63_temp) %in% rownames(annot1_temp)]
+dt_63_temp=dt_63_temp[,order(match(colnames(dt_63_temp),rownames(annot1_temp)))]
+pheatmap(dt_63_temp,scale="column",annotation_col = annot1_temp,clustering_method = "ward.D",
+         show_colnames =  F,annotation_colors = mat_colors,cluster_cols = F)
+
+
+##Gleason-Young
+mat_colors <- list(`Age Category` = c("#7fc97f"),
+                   Gleason=c('#fec44f',"#d95f0e"),
+                   `Biochemical Recurrence`=c('#1b9e77','#7570b3')
+)
+names(mat_colors$`Age Category`) <- c("42-58")
+names(mat_colors$Gleason) <- c("3+3","3+4")
+names(mat_colors$`Biochemical Recurrence`) <- c("No","Yes")
+
+annot2=covar_63_annot %>% filter(!is.na(`Age Category 2`)) %>% 
+  select(`Age Category`=`Age Category 2`,Gleason,`Biochemical Recurrence`)
+dt_63_temp=dt_63_im %>% select(rownames(annot2))
+
+annot1_temp=annot2 %>% select(`Age Category`,`Gleason`)  %>% 
+  filter(`Age Category`=="42-58") %>% arrange(`Gleason`)
+dt_63_temp=dt_63_temp[,colnames(dt_63_temp) %in% rownames(annot1_temp)]
+dt_63_temp=dt_63_temp[,order(match(colnames(dt_63_temp),rownames(annot1_temp)))]
+pheatmap(dt_63_temp,scale="column",annotation_col = annot1_temp,clustering_method = "ward.D",
+         show_colnames =  F,annotation_colors = mat_colors,cluster_cols = F)
+
+
+###olrder
+mat_colors <- list(`Age Category` = c("#fdc086"),
+                   Gleason=c('#fec44f',"#d95f0e"),
+                   `Biochemical Recurrence`=c('#1b9e77','#7570b3')
+)
+names(mat_colors$`Age Category`) <- c("66-73")
+names(mat_colors$Gleason) <- c("3+3","3+4")
+names(mat_colors$`Biochemical Recurrence`) <- c("No","Yes")
+
+annot2=covar_63_annot %>% filter(!is.na(`Age Category 2`)) %>% 
+  select(`Age Category`=`Age Category 2`,Gleason,`Biochemical Recurrence`)
+dt_63_temp=dt_63_im %>% select(rownames(annot2))
+
+annot1_temp=annot2 %>% select(`Age Category`,`Gleason`)  %>% 
+  filter(`Age Category`=="66-73") %>% arrange(`Gleason`)
+dt_63_temp=dt_63_temp[,colnames(dt_63_temp) %in% rownames(annot1_temp)]
+dt_63_temp=dt_63_temp[,order(match(colnames(dt_63_temp),rownames(annot1_temp)))]
+pheatmap(dt_63_temp,scale="column",annotation_col = annot1_temp,clustering_method = "ward.D",
+         show_colnames =  F,annotation_colors = mat_colors,cluster_cols = F)
+
+
+
+
+
+
+```

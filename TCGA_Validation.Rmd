@@ -1,0 +1,161 @@
+---
+title: "TCGA Validation"
+author: "Darryl Nousome"
+date: "11/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(arsenal)
+library(kableExtra)
+library(ggplot2)
+res=read_rds("finalres.rds")
+covar=read_rds("covar.rds")
+gres=read_rds("gres.rds")
+```
+
+## Methods
+
+Covariate and RNA-Seq from TCGA were downloaded from the recount2 website.  
+http://duffel.rail.bio/recount/v2/TCGA/rse_gene_prostate.Rdata  
+
+Covariate data were processed by extracting the Gleason score and categorizing into 6, 3+4, 4+3, and 8-10.
+
+Two cutpoints were used for age.  
+Cutpoint 1: Young=40-60 and Old=61-80   
+Cutpoint 2: Young=42-58 and Old=66-73  
+Cutpoint 2 has more missing due to the more stringent cutpoints
+
+
+```{r table1,echo=F,message=F,error=F}
+covar$age_cat2=factor(covar$age_cat2,labels=c("42-58","66-73"))
+covar$Gleason=factor(covar$Gleason,labels=c("6","3+4","4+3","8-10"))
+
+tab.bygroup <- tableby(~ xml_age_at_initial_pathologic_diagnosis+Gleason+age_cat1+age_cat2, data=covar,test=F) 
+labelsdt=list(`xml_age_at_initial_pathologic_diagnosis`="Age at diagonsis",Gleason="Gleason Score",age_cat1="Young/Old Cutpoint 1",age_cat2="Young/Old Cutpoint 2")
+
+summary(tab.bygroup,labelTranslations=labelsdt,digits=1) %>% 
+  kable(format="markdown")
+
+ggplot(covar,aes(xml_age_at_initial_pathologic_diagnosis)) +
+  geom_histogram(bins=20) +xlab("Age at Diagnosis")
+
+```
+
+## Differential Expression Analysis with DESeq2
+RNA-Seq count data were then processed and scaled using DESeq2.
+Two models for each analysis were run: Unadjusted and adjusted for Gleason score
+
+8 columns show the results  
+GeneName: Gene Name  
+Gene: Gencode V25 Name  
+BaseMean: Mean in across all groups  
+log2FoldChange: Old vs Young (Young is the reference group) log2 Fold Change  
+lfcSE: Log2 Fold Change Standard Error  
+Stat: Test statistic  
+pvalue: Likelihood ratio test P-value  
+padj: Adjusted P-value for entire genome differential expression test. This is adjusted for all ~58,000 genes tested and is conservative.
+
+Pvalue column may be appropriate for validation.
+
+```{r results, echo=FALSE}
+res[[1]]  %>% 
+  mutate(pvalue=format.pval(pvalue, eps = .001, digits = 2)) %>%
+  mutate(padj=format.pval(padj, eps = .01, digits = 2)) %>%
+  kable(caption="Unadjusted results for Old vs Young (Reference group) with Cutpoint",digits=2) %>% kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+res[[2]]  %>% 
+  mutate(pvalue=format.pval(pvalue, eps = .001, digits = 2)) %>%
+  kable(caption="Adjusted for Gleason results for Old vs Young (Reference group) with Cutpoint",digits=2) %>% kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+
+
+```
+
+### Results Stratified by Gleason Score
+All analyses were then stratifed by 3 Gleason Score categories (3+3, 3+4/4+3, and 8-10)
+```{r gres, echo=FALSE}
+
+gres[[1]]  %>% 
+  mutate(pvalue=format.pval(pvalue, eps = .001, digits = 2)) %>%
+  kable(caption="Gleason Score 6/3+4 results for Old vs Young (Reference group) with Cutpoint",digits=2) %>% kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+
+
+
+gres[[2]]  %>% 
+  mutate(pvalue=format.pval(pvalue, eps = .001, digits = 2)) %>%
+  mutate(padj=format.pval(padj, eps = .01, digits = 2)) %>%
+  kable(caption="Gleason Score 4+3/8-10 results for Old vs Young (Reference group) with Cutpoint",digits=2) %>% kable_styling() %>%
+  scroll_box(width = "800px", height = "300px")
+
+```
+
+```{r hm,out.width="200%",echo=F,}
+library(pheatmap)
+##A1
+hm_dt=read_rds("hm_tcga.rds")
+vst_annot1=hm_dt[[1]] %>% 
+  mutate(Gleason=ifelse(Gleason=='6','3+3/3+4',ifelse(Gleason=="34","3+3/3+4",ifelse(Gleason=="43","4+3/8-10",ifelse(Gleason=="8-10","4+3/8-10",as.character(Gleason)))))) %>%
+  mutate(Gleason=factor(Gleason,levels=c("3+3/3+4","4+3/8-10"))) %>%
+  dplyr::select("Gleason",`Age Category`="Young/Old Cutpoint") 
+rownames(vst_annot1)=rownames(hm_dt[[1]])
+
+mat_colors <- list(`Age Category` = c("#7fc97f","#fdc086"),
+                   Gleason=c('#fec44f',"#d95f0e")
+                   )
+names(mat_colors$`Age Category`) <- c("42-58","66-73")
+names(mat_colors$Gleason) <- c("3+3/3+4","4+3/8-10")
+
+temp_vec=hm_dt[[2]][2,]
+
+temp_sort=order(vst_annot1$`Age Category`,temp_vec)
+temp_hm=hm_dt[[2]][,temp_sort]
+temp_annot=vst_annot1 %>% select(`Age Category`)
+pheatmap(temp_hm,clustering_method = "ward.D2",show_colnames = F,annotation_col = temp_annot,annotation_colors = mat_colors,cluster_cols=F)
+
+
+###
+mat_colors <- list(`Age Category` = c("#7fc97f"),
+                   Gleason=c('#fec44f',"#d95f0e")
+                   )
+names(mat_colors$`Age Category`) <- c("42-58")
+names(mat_colors$Gleason) <- c("3+3/3+4","4+3/8-10")
+
+temp_annot=vst_annot1 %>% 
+  filter(`Age Category`=="42-58")
+temp_hm=hm_dt[[2]][,colnames(hm_dt[[2]]) %in% rownames(temp_annot)] 
+
+temp_vec=temp_hm[2,]
+
+temp_sort=order(temp_annot$Gleason,temp_vec)
+temp_hm=temp_hm[,temp_sort]
+
+
+pheatmap(temp_hm,clustering_method = "ward.D2",show_colnames = F,annotation_col = temp_annot,annotation_colors = mat_colors,cluster_cols=F)
+
+
+
+###
+
+mat_colors <- list(`Age Category` = c("#fdc086"),
+                   Gleason=c('#fec44f',"#d95f0e")
+                   )
+names(mat_colors$`Age Category`) <- c("66-73")
+names(mat_colors$Gleason) <- c("3+3/3+4","4+3/8-10")
+
+temp_annot=vst_annot1 %>% 
+  filter(`Age Category`=="66-73")
+temp_hm=hm_dt[[2]][,colnames(hm_dt[[2]]) %in% rownames(temp_annot)] 
+
+temp_vec=temp_hm[2,]
+
+temp_sort=order(temp_annot$Gleason,temp_vec)
+temp_hm=temp_hm[,temp_sort]
+
+
+pheatmap(temp_hm,clustering_method = "ward.D2",show_colnames = F,annotation_col = temp_annot,annotation_colors = mat_colors,cluster_cols=F)
+
+```
